@@ -1,42 +1,40 @@
 import logging
 import os
 from pathlib import Path
+import tempfile # Nouvel import pour gérer les fichiers temporaires
+
 import boto3
+import mlflow # Nouvel import pour mlflow
 import pandas as pd
 from ydata_profiling import ProfileReport
 
-# Configuration S3 / MinIO
-MLFLOW_S3_ENDPOINT_URL = "https://minio-api-albanprvst-dev.apps.rm1.0a51.p1.openshiftapps.com"
-AWS_ACCESS_KEY_ID = "minio"
-AWS_SECRET_ACCESS_KEY = "minio123"
+
+ARTIFACT_PATH = "path_output"
+PROFILING_PATH = "profiling_reports"
+
 
 def load_data(path: str) -> str:
-    logging.warning(f"load_data on path : {path}")
-    
-    # Création du dossier de destination
-    local_dir = Path("./dist")
-    local_dir.mkdir(parents=True, exist_ok=True)
-    local_path = local_dir / "data.csv"
-    
-    logging.warning(f"Downloading to : {local_path}")
+  logging.warning(f"load_data on path : {path}")
 
-    # Client S3
+  with tempfile.TemporaryDirectory() as tmp_dir: # Utilisation d'un dossier temporaire
+    local_path = Path(tmp_dir, "data.csv") # Fichier temporaire pour stocker les données
+    logging.warning(f"to path : {local_path}")
+
     s3_client = boto3.client(
-        "s3",
-        endpoint_url=MLFLOW_S3_ENDPOINT_URL,
-        aws_access_key_id=AWS_ACCESS_KEY_ID,
-        aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
+      "s3",
+      endpoint_url=os.environ.get("MLFLOW_S3_ENDPOINT_URL"),
+      aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID"),
+      aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY"),
     )
 
-    # Téléchargement depuis le bucket 'kto-titanic'
-    s3_client.download_file("kto-titanic", path, str(local_path))
-    
-    # Lecture pour vérification et Profiling
+    s3_client.download_file("kto-titanic", path, local_path)
     df = pd.read_csv(local_path)
-    
-    # Génération du rapport de profiling (optionnel)
-    profile = ProfileReport(df, title=f"Profiling Report - {path}")
-    profile.to_file(local_dir / "profile.html")
 
-    # TRÈS IMPORTANT : On renvoie le chemin vers le fichier téléchargé
-    return str(local_path)
+    profile = ProfileReport(df, title=f"Profiling Report - {local_path.stem}")
+    with tempfile.NamedTemporaryFile(suffix=".html", delete=False) as tmp_file: # Fichier temporaire pour le rapport de profiling
+      profile.to_file(tmp_file.name)
+      mlflow.log_artifact(tmp_file.name, PROFILING_PATH) # Log du rapport de profiling dans mlflow
+
+    mlflow.log_artifact(str(local_path), ARTIFACT_PATH) # Log du fichier de données dans mlflow
+
+  return f"{ARTIFACT_PATH}/{local_path.name}" # Retourne le chemin dans mlflow
