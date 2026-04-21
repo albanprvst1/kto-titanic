@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
         - name: titanic-api
-          image: quay.io/albanprvst/titanic/api:latest
+          image: quay.io/kto_gthomas/titanic/api:latest
           ports:
             - containerPort: 8080
           resources:
